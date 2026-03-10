@@ -80,12 +80,8 @@
   let liveActive = false;
 
   document.getElementById('btn-live').addEventListener('click', async () => {
-    const statusData = await api('/api/status').catch(() => null);
-    const streamUrl = statusData && statusData.stream_url;
-    if (!streamUrl) { alert('Stream URL not configured'); return; }
-
     document.getElementById('live-section').classList.remove('hidden');
-    document.getElementById('live-img').src = streamUrl;
+    document.getElementById('live-img').src = '/stream';
     liveActive = true;
     document.getElementById('btn-live').disabled = true;
   });

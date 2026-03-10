@@ -1,15 +1,47 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const router = express.Router();
 
 const { readState, writeState, readConfig, writeConfig, PATHS, listDailyTimelapses, getRollingTimelapses } = require('../services/storage');
-const { fetchSnapshot, checkCameraOnline, getStreamUrl } = require('../services/cameraClient');
+const { fetchSnapshot } = require('../services/cameraClient');
+const { acquireLock } = require('../services/locks');
+
+const CAPTURE_LOCK = '/tmp/growcam-capture.lock';
+
+function getDiskUsage() {
+  try {
+    const stat = fs.statfsSync(PATHS.data);
+    const total = stat.blocks * stat.bsize;
+    const free = stat.bavail * stat.bsize;
+    return {
+      total,
+      free,
+      used: total - free,
+      used_percent: total > 0 ? Number((((total - free) / total) * 100).toFixed(2)) : 0,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function spawnScript(scriptName, args = []) {
+  const child = spawn(process.execPath, [path.join(__dirname, '..', '..', 'scripts', scriptName), ...args], {
+    cwd: path.join(__dirname, '..', '..'),
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
 
 router.get('/status', async (req, res) => {
   const state = readState();
   const config = readConfig();
   const latestExists = fs.existsSync(PATHS.latestJpg);
+  const staleAfterMs = (Number(config.capture_interval_min) || 10) * 60 * 1000 * 2;
+  const stale_capture = !state.last_capture_ok || (Date.now() - Date.parse(state.last_capture_ok) > staleAfterMs);
+
   res.json({
     camera_online: state.camera_online || false,
     last_capture_ok: state.last_capture_ok || null,
@@ -17,6 +49,8 @@ router.get('/status', async (req, res) => {
     total_frames_today: state.total_frames_today || 0,
     latest_snapshot_exists: latestExists,
     stream_url: config.camera_stream_url,
+    stale_capture,
+    disk_usage: getDiskUsage(),
   });
 });
 
@@ -35,8 +69,10 @@ router.post('/capture-now', async (req, res) => {
   }
 
   const framePath = path.join(frameDir, `${timeStr}.jpg`);
+  let releaseLock;
 
   try {
+    releaseLock = acquireLock(CAPTURE_LOCK);
     const result = await fetchSnapshot(PATHS.latestJpg);
     fs.copyFileSync(PATHS.latestJpg, framePath);
 
@@ -48,11 +84,27 @@ router.post('/capture-now', async (req, res) => {
 
     res.json({ ok: true, timestamp: now.toISOString(), size: result.size });
   } catch (err) {
+    if (err.code === 'EEXIST') {
+      return res.status(429).json({ ok: false, error: 'Capture already running' });
+    }
     state.camera_online = false;
     state.last_capture_error = err.message;
     writeState(state);
     res.status(502).json({ ok: false, error: err.message });
+  } finally {
+    if (releaseLock) releaseLock();
   }
+});
+
+router.post('/timelapse/render-today', (req, res) => {
+  const date = new Date().toISOString().slice(0, 10);
+  spawnScript('render-daily.js', [date]);
+  res.status(202).json({ ok: true, message: `Render for ${date} started` });
+});
+
+router.post('/timelapse/render-rolling', (req, res) => {
+  spawnScript('render-rolling.js');
+  res.status(202).json({ ok: true, message: 'Rolling render started' });
 });
 
 router.get('/timelapse/daily', (req, res) => {
