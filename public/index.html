@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GrowCam Dashboard</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <nav class="top-nav">
+    <div class="nav-brand">
+      <span class="nav-icon">&#127757;</span>
+      GrowCam
+    </div>
+    <div class="nav-tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="timelapse">Timelapse</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+      <button class="tab-btn" data-tab="watering">Watering</button>
+    </div>
+  </nav>
+
+  <main class="main-content">
+
+    <!-- DASHBOARD TAB -->
+    <section id="tab-dashboard" class="tab-section active">
+      <div class="grid grid-2">
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Camera Status</h2>
+            <span id="status-badge" class="badge badge-unknown">Checking...</span>
+          </div>
+          <div class="card-body">
+            <div class="status-row">
+              <span class="label">Last capture</span>
+              <span id="last-capture" class="value">—</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Frames today</span>
+              <span id="frames-today" class="value">0</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Last error</span>
+              <span id="last-error" class="value error-text">—</span>
+            </div>
+          </div>
+          <div class="card-footer">
+            <button id="btn-capture" class="btn btn-primary">Capture Now</button>
+            <button id="btn-refresh-status" class="btn btn-ghost">Refresh</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Latest Snapshot</h2>
+            <span id="snapshot-ts" class="ts-label">—</span>
+          </div>
+          <div class="card-body snapshot-body">
+            <img id="snapshot-img" src="/media/latest.jpg" alt="Latest snapshot" onerror="this.src='/placeholder.svg'" />
+          </div>
+          <div class="card-footer">
+            <button id="btn-live" class="btn btn-accent">&#9654; Start Live</button>
+            <a id="snapshot-download" href="/media/latest.jpg" download="latest.jpg" class="btn btn-ghost">Download</a>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Live stream section (hidden by default) -->
+      <div id="live-section" class="card live-card hidden">
+        <div class="card-header">
+          <h2>&#128247; Live Stream</h2>
+          <button id="btn-live-stop" class="btn btn-danger btn-sm">Stop</button>
+        </div>
+        <div class="live-warning">
+          &#9888; Live stream is resource-intensive. Only open in 1 tab at a time.
+        </div>
+        <div class="card-body live-body">
+          <img id="live-img" src="" alt="Live stream" />
+        </div>
+      </div>
+    </section>
+
+    <!-- TIMELAPSE TAB -->
+    <section id="tab-timelapse" class="tab-section hidden">
+      <h1 class="section-title">Timelapse</h1>
+
+      <div class="card">
+        <div class="card-header"><h2>Rolling Timelapses</h2></div>
+        <div class="card-body" id="rolling-timelapse-container">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+
+      <div class="card mt-2">
+        <div class="card-header">
+          <h2>Daily Timelapses</h2>
+          <button id="btn-render-today" class="btn btn-primary btn-sm">Render Today</button>
+        </div>
+        <div id="daily-timelapse-container" class="timelapse-grid">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS TAB -->
+    <section id="tab-settings" class="tab-section hidden">
+      <h1 class="section-title">Settings</h1>
+      <div class="card">
+        <div class="card-header"><h2>Camera Configuration</h2></div>
+        <form id="settings-form" class="card-body settings-form">
+          <div class="form-group">
+            <label for="cfg-camera-base-url">Camera Base URL</label>
+            <input type="url" id="cfg-camera-base-url" name="camera_base_url" placeholder="http://192.168.2.120" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-stream-url">Stream URL</label>
+            <input type="url" id="cfg-stream-url" name="camera_stream_url" placeholder="http://192.168.2.120:81/stream" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-interval">Capture Interval (minutes)</label>
+            <input type="number" id="cfg-interval" name="capture_interval_min" min="1" max="60" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-lights-on">Lights On (HH:MM)</label>
+            <input type="time" id="cfg-lights-on" name="lights_on" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-lights-off">Lights Off (HH:MM)</label>
+            <input type="time" id="cfg-lights-off" name="lights_off" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-fps">Timelapse FPS</label>
+            <input type="number" id="cfg-fps" name="timelapse_fps" min="1" max="60" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-retention">Frame Retention (days)</label>
+            <input type="number" id="cfg-retention" name="retention_days" min="1" max="365" />
+          </div>
+          <div class="card-footer">
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+            <span id="settings-msg" class="settings-msg"></span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- WATERING TAB -->
+    <section id="tab-watering" class="tab-section hidden">
+      <h1 class="section-title">Watering</h1>
+      <div class="card coming-soon-card">
+        <div class="coming-soon-icon">&#128166;</div>
+        <h2>Coming Soon</h2>
+        <p>Hardware control for watering is not yet connected. GPIO integration is planned.</p>
+        <div class="stub-btns">
+          <button class="btn btn-ghost" onclick="callStub('/api/water/arm')">Arm (stub)</button>
+          <button class="btn btn-ghost" onclick="callStub('/api/water/run')">Run (stub)</button>
+        </div>
+        <div id="stub-result" class="stub-result"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal for video playback -->
+  <div id="video-modal" class="modal hidden">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <span id="modal-title">Video</span>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <video id="modal-video" controls></video>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

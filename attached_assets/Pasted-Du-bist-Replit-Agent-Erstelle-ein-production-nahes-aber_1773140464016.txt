@@ -1,0 +1,148 @@
+Du bist Replit Agent. Erstelle ein production‑nahes, aber bewusst leichtgewichtiges Full‑Stack Projekt (Node.js + Express) für ein Raspberry‑Pi Dashboard, das eine ESP32‑CAM (OV2640) integriert. Fokus: Performance, Stabilität, schönes fluid‑responsive Design, minimale Last auf der Kamera.
+
+KONTEXT
+- Die ESP32‑CAM ist leistungsschwach. Wenn Stream + Capture zu oft gleichzeitig passiert, hängt sie.
+- Daher: Das Dashboard darf NICHT permanent die Kamera abfragen. Standardmäßig zeigt das Dashboard immer nur einen gepufferten Snapshot (“latest.jpg”), der vom Raspberry Pi in Intervallen aktualisiert wird.
+- Live‑Stream soll nur starten, wenn der User aktiv im “Live” Bereich ist (Button “Live starten”), und der UI soll dafür warnen “nur 1 Live‑Tab öffnen”.
+
+KAMERA ENDPOINTS (konfigurierbar)
+- Default Kamera Base URL: http://192.168.2.120
+- Snapshot: {BASE_URL}/capture
+- Stream:  http://192.168.2.120:81/stream
+Diese Werte müssen per Settings änderbar sein (UI + persistente Speicherung), ohne Code ändern zu müssen.
+
+TECH STACK (muss auf Raspberry Pi OS laufen)
+- Node.js (18+), Express
+- Keine schweren Frontend Frameworks (kein React/Next). Nutze vanilla HTML/CSS/JS.
+- CSS: modernes, fluid‑responsive Design (fluid typography mit clamp(), CSS variables, Cards, Grid, Dark‑Mode by default, hübsche Buttons).
+- Speicherung ohne DB: filesystem‑basiert (JSON state/config + Ordnerstruktur).
+- Optional: NGINX Reverse Proxy (nur README Snippet; App läuft auch ohne NGINX).
+
+FUNKTIONEN (MVP)
+1) Dashboard (Tab)
+   - Card: “Camera Status” (online/offline, last successful capture timestamp)
+   - Card: “Latest Snapshot” (zeigt /media/latest.jpg vom Pi; Bild lädt schnell)
+   - Button: “Capture now” -> ruft Backend API, die EINEN Snapshot zieht und speichert (und latest.jpg aktualisiert)
+   - Button: “Live starten” -> zeigt MJPEG stream in einem <img> oder <video> Bereich (nur dann!)
+   - Warnhinweis: “Live ist teuer, nur 1 Tab offen halten”
+
+2) Timelapse (Tab)
+   - Rolling Timelapse:
+     - /media/timelapse/rolling_7d.mp4
+     - /media/timelapse/rolling_30d.mp4
+     Falls nicht vorhanden: “Noch nicht erzeugt”.
+   - Daily Timelapse Browser:
+     - Listet alle /media/timelapse/daily/YYYY-MM-DD.mp4
+     - Grid‑Cards mit Datum, Dateigröße, Play‑Button (Modal oder <video controls>)
+     - Download‑Link pro Video
+   - Button: “Render today” (optional) -> triggert daily render per API
+
+3) Settings (Tab)
+   - Form: Kamera Base URL, Stream URL (oder base + streamPort), Capture Interval (min), Lights schedule (on/off Uhrzeit)
+   - Save Button -> persistiert in ./data/config.json (oder DATA_DIR/config.json)
+   - Hinweis: Änderungen wirken ohne Neustart (Backend liest config neu oder cached mit reload)
+
+4) Watering (Tab, Placeholder)
+   - Noch keine Hardwaresteuerung, aber UI/Route stubs:
+     - Anzeige “coming soon”
+     - API placeholder /api/water/arm, /api/water/run (nur stubs, noch ohne GPIO)
+   - Wichtig: Projektstruktur soll so sein, dass man später leicht erweitern kann.
+
+BACKGROUND JOBS (auf Pi)
+- Capture Job:
+  - Alle X Minuten (default 10) einen Snapshot ziehen (HTTP GET /capture), speichern als:
+    DATA_DIR/frames/YYYY-MM-DD/HHMMSS.jpg
+  - Zusätzlich kopiere/replace:
+    DATA_DIR/latest/latest.jpg (oder DATA_DIR/media/latest.jpg)
+  - Schreibe Status nach DATA_DIR/state.json:
+    last_capture_ok, last_capture_error, total_frames_today etc.
+  - Wenn “lights off” (nach config), dann skip capture (Exit 0, log “skipped by schedule”)
+
+- Daily Render Job (täglich, z.B. 00:10):
+  - Rendere aus Frames des Tages eine MP4:
+    ffmpeg -framerate {FPS} -pattern_type glob -i "*.jpg" -c:v libx264 -pix_fmt yuv420p -movflags +faststart output.mp4
+  - Output:
+    DATA_DIR/timelapse/daily/YYYY-MM-DD.mp4
+
+- Rolling Render Job:
+  - Baue rolling_7d.mp4 und rolling_30d.mp4 aus den letzten daily mp4s über ffmpeg concat demuxer:
+    ffconcat version 1.0
+    file /absolute/path/to/daily/2026-03-01.mp4
+    ...
+  - Versuch zuerst “-c copy”. Wenn das fehlschlägt, fallback auf re-encode mit libx264 + yuv420p.
+  - Output:
+    DATA_DIR/timelapse/rolling_7d.mp4
+    DATA_DIR/timelapse/rolling_30d.mp4
+
+- Retention/Prune Job (täglich):
+  - Lösche frames Ordner älter als RETENTION_DAYS (default 30)
+  - Lösche daily videos älter als RETENTION_DAYS
+
+APP ROUTES
+- GET  /api/status
+- POST /api/capture-now
+- GET  /api/timelapse/daily  (list JSON)
+- GET  /api/timelapse/rolling (list JSON)
+- GET  /api/config
+- POST /api/config
+- static media:
+  - GET /media/latest.jpg
+  - GET /media/timelapse/...
+
+DATEISTRUKTUR (bitte exakt so anlegen)
+- package.json (start scripts)
+- src/server.js
+- src/routes/api.js
+- src/services/cameraClient.js (fetch Snapshot/Stream URL handling)
+- src/services/storage.js (paths, ensure dirs, write state/config)
+- scripts/capture.js
+- scripts/render-daily.js (oder .sh, aber besser Node + spawn)
+- scripts/render-rolling.js
+- scripts/prune.js
+- public/index.html
+- public/styles.css
+- public/app.js
+- data/.gitkeep (nur damit Ordner existiert)
+- README.md (Pi setup, systemd service+timer snippets, nginx reverse proxy snippet)
+
+ENV / CONFIG
+- Nutze .env.example und in Code process.env:
+  - DATA_DIR=./data
+  - PORT=3000
+  - CAMERA_BASE_URL=http://192.168.2.120
+  - CAMERA_STREAM_URL=http://192.168.2.120:81/stream
+  - CAPTURE_INTERVAL_MIN=10
+  - LIGHTS_ON=06:00
+  - LIGHTS_OFF=24:00
+  - TIMELAPSE_FPS=30
+  - RETENTION_DAYS=30
+- Wichtig: Auf Replit muss das Projekt auch ohne Kamera laufen:
+  - Wenn Kamera nicht erreichbar, UI zeigt “offline” und nutzt Placeholder image.
+
+DEPLOYMENT OUTPUT (README muss enthalten)
+- Pi prerequisites:
+  - apt install ffmpeg
+  - Node.js 18+
+- systemd units:
+  - growcam-web.service (node server)
+  - growcam-capture.service + growcam-capture.timer (OnBootSec + OnUnitActiveSec)
+  - growcam-daily.service + growcam-daily.timer (OnCalendar, Persistent=true)
+  - growcam-prune.service + growcam-prune.timer
+- nginx snippet:
+  - proxy_pass auf 127.0.0.1:3000
+  - proxy_set_header Host $host
+  - proxy_buffering off für /live (wenn über nginx proxied)
+
+DESIGN UX (sehr wichtig)
+- Modernes, cleanes, dark UI mit:
+  - sticky top nav (Tabs)
+  - Cards/Grid layout
+  - große, klare Buttons
+  - responsive (mobile first)
+  - “fluid” spacing/typography via clamp()
+- Keine “überladene” Seite: Standardmäßig nur Snapshot + Status. Stream nur on-demand.
+
+ABSCHLUSS
+- Erzeuge sämtliche Dateien vollständig (kein Pseudocode), sodass “npm install && npm start” in Replit läuft (auch ohne Kamera).
+- Schreibe saubere Kommentare, klare Fehlermeldungen, und mache das System robust gegen Offline/Timeouts.
+- Achte streng darauf, die ESP32‑CAM nicht zu überlasten: KEINE Auto‑Refreshes im Sekundentakt, keine parallelen Snapshot‑Spikes.

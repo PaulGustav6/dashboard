@@ -1,0 +1,6 @@
+node_modules/
+.env
+data/frames/
+data/timelapse/
+data/latest/
+*.log

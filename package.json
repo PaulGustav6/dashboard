@@ -1,0 +1,15 @@
+{
+  "name": "growcam-dashboard",
+  "version": "1.0.0",
+  "description": "ESP32-CAM Raspberry Pi Dashboard",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "node-fetch": "^2.7.0"
+  }
+}
