@@ -8,11 +8,13 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { acquireLock } = require('../src/services/locks');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FRAMES_DIR = path.join(DATA_DIR, 'frames');
 const TIMELAPSE_DAILY = path.join(DATA_DIR, 'timelapse', 'daily');
 const FPS = parseInt(process.env.TIMELAPSE_FPS || '30', 10);
+const RENDER_LOCK = '/tmp/growcam-render.lock';
 
 function ensureDir(d) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); }
 
@@ -40,14 +42,31 @@ async function render(dateStr) {
   const cmd = `ffmpeg -y -framerate ${FPS} -pattern_type glob -i "${frameDir}/*.jpg" -c:v libx264 -pix_fmt yuv420p -movflags +faststart "${output}"`;
 
   console.log(`Rendering ${frames.length} frames for ${dateStr}...`);
+  execSync(cmd, { stdio: 'inherit' });
+  console.log(`Rendered: ${output}`);
+}
+
+async function main() {
+  let releaseLock;
   try {
-    execSync(cmd, { stdio: 'inherit' });
-    console.log(`Rendered: ${output}`);
+    releaseLock = acquireLock(RENDER_LOCK);
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      console.log('Render already running, skipping');
+      process.exit(0);
+    }
+    throw err;
+  }
+
+  try {
+    const dateArg = process.argv[2] || getTargetDate();
+    await render(dateArg);
   } catch (e) {
     console.error('Render failed:', e.message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    releaseLock();
   }
 }
 
-const dateArg = process.argv[2] || getTargetDate();
-render(dateArg);
+main();

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+  <rect width="100%" height="100%" fill="#0a0c12"/>
+  <text x="50%" y="48%" fill="#d0d3e2" text-anchor="middle" font-family="system-ui, sans-serif" font-size="28" font-weight="700">Camera Offline</text>
+  <text x="50%" y="56%" fill="#8c90aa" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16">No snapshot available</text>
+</svg>

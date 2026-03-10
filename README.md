@@ -5,6 +5,7 @@ A lightweight, production-ready dashboard for an ESP32-CAM (OV2640) running on a
 ## Features
 
 - Live snapshot viewer with on-demand live stream
+- Live stream proxy endpoint (`/stream`) for remote access via the Pi
 - Background capture scheduling
 - Timelapse rendering (daily + rolling 7d/30d)
 - Configurable settings (persisted to `data/config.json`)
@@ -58,19 +59,35 @@ node scripts/prune.js
 
 ```ini
 [Unit]
-Description=GrowCam Dashboard
-After=network.target
+Description=GrowCam Dashboard (Web)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/growcam
-ExecStart=/usr/bin/node src/server.js
+WorkingDirectory=/home/pi/growcam-dashboard
+EnvironmentFile=/home/pi/growcam-dashboard/.env
+ExecStart=/usr/bin/node /home/pi/growcam-dashboard/src/server.js
 Restart=always
-EnvironmentFile=/home/pi/growcam/.env
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
+```
+
+### `/etc/systemd/system/growcam-capture.service`
+
+```ini
+[Unit]
+Description=GrowCam Capture Job
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/growcam-dashboard
+EnvironmentFile=/home/pi/growcam-dashboard/.env
+ExecStart=/usr/bin/node /home/pi/growcam-dashboard/scripts/capture.js
 ```
 
 ### `/etc/systemd/system/growcam-capture.timer`
@@ -81,25 +98,108 @@ Description=GrowCam Capture Timer
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=10min
-AccuracySec=30s
+OnUnitActiveSec=1min
+AccuracySec=10s
 
 [Install]
 WantedBy=timers.target
 ```
 
-### `/etc/systemd/system/growcam-daily.timer`
+> Note: the timer runs every minute, and `capture_interval_min` in `data/config.json` decides whether a run captures or skips.
+
+### `/etc/systemd/system/growcam-render-daily.service`
 
 ```ini
 [Unit]
-Description=GrowCam Daily Timelapse Timer
+Description=GrowCam Daily Timelapse Render
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/growcam-dashboard
+EnvironmentFile=/home/pi/growcam-dashboard/.env
+ExecStart=/usr/bin/node /home/pi/growcam-dashboard/scripts/render-daily.js
+TimeoutStartSec=20min
+```
+
+### `/etc/systemd/system/growcam-render-daily.timer`
+
+```ini
+[Unit]
+Description=GrowCam Daily Render Timer
 
 [Timer]
 OnCalendar=*-*-* 00:10:00
 Persistent=true
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target
+```
+
+### `/etc/systemd/system/growcam-render-rolling.service`
+
+```ini
+[Unit]
+Description=GrowCam Rolling Timelapse Render
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/growcam-dashboard
+EnvironmentFile=/home/pi/growcam-dashboard/.env
+ExecStart=/usr/bin/node /home/pi/growcam-dashboard/scripts/render-rolling.js
+TimeoutStartSec=20min
+```
+
+### `/etc/systemd/system/growcam-render-rolling.timer`
+
+```ini
+[Unit]
+Description=GrowCam Rolling Render Timer
+
+[Timer]
+OnCalendar=*-*-* 00:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+### `/etc/systemd/system/growcam-prune.service`
+
+```ini
+[Unit]
+Description=GrowCam Prune Job
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/growcam-dashboard
+EnvironmentFile=/home/pi/growcam-dashboard/.env
+ExecStart=/usr/bin/node /home/pi/growcam-dashboard/scripts/prune.js
+```
+
+### `/etc/systemd/system/growcam-prune.timer`
+
+```ini
+[Unit]
+Description=GrowCam Prune Timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+### Enable services/timers
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now growcam-web.service
+sudo systemctl enable --now growcam-capture.timer growcam-render-daily.timer growcam-render-rolling.timer growcam-prune.timer
 ```
 
 ## NGINX Reverse Proxy (Optional)
@@ -115,9 +215,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    location /media/timelapse/ {
-        proxy_pass http://127.0.0.1:5000;
+    location /stream {
+        proxy_pass http://127.0.0.1:5000/stream;
         proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }
 ```

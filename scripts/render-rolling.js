@@ -8,10 +8,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
+const { acquireLock } = require('../src/services/locks');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const TIMELAPSE_DAILY = path.join(DATA_DIR, 'timelapse', 'daily');
 const TIMELAPSE_DIR = path.join(DATA_DIR, 'timelapse');
+const RENDER_LOCK = '/tmp/growcam-render.lock';
 
 function ensureDir(d) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); }
 
@@ -24,8 +26,12 @@ function getDailyFiles(days) {
     .map(f => path.join(TIMELAPSE_DAILY, f));
 }
 
+function quoteConcatPath(filePath) {
+  return filePath.replace(/'/g, "'\\''");
+}
+
 function buildConcat(files) {
-  const lines = ['ffconcat version 1.0', ...files.map(f => `file ${f}`)];
+  const lines = ['ffconcat version 1.0', ...files.map(f => `file '${quoteConcatPath(f)}'`)];
   const tmpFile = path.join(os.tmpdir(), `concat_${Date.now()}.txt`);
   fs.writeFileSync(tmpFile, lines.join('\n'));
   return tmpFile;
@@ -62,5 +68,24 @@ function renderRolling(days, label) {
   if (ok) console.log(`Done: ${output}`);
 }
 
-renderRolling(7, '7d');
-renderRolling(30, '30d');
+function main() {
+  let releaseLock;
+  try {
+    releaseLock = acquireLock(RENDER_LOCK);
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      console.log('Render already running, skipping');
+      process.exit(0);
+    }
+    throw err;
+  }
+
+  try {
+    renderRolling(7, '7d');
+    renderRolling(30, '30d');
+  } finally {
+    releaseLock();
+  }
+}
+
+main();

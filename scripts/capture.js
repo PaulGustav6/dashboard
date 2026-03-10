@@ -9,18 +9,21 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
+const { acquireLock } = require('../src/services/locks');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FRAMES_DIR = path.join(DATA_DIR, 'frames');
 const LATEST_DIR = path.join(DATA_DIR, 'latest');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const CAPTURE_LOCK = '/tmp/growcam-capture.lock';
 
 function readConfig() {
   const defaults = {
     camera_base_url: process.env.CAMERA_BASE_URL || 'http://192.168.2.120',
     lights_on: process.env.LIGHTS_ON || '06:00',
     lights_off: process.env.LIGHTS_OFF || '24:00',
+    capture_interval_min: parseInt(process.env.CAPTURE_INTERVAL_MIN || '10', 10),
   };
   try {
     if (fs.existsSync(CONFIG_FILE)) {
@@ -50,11 +53,37 @@ function isLightsOn(config) {
   return hhmm >= on && hhmm < off;
 }
 
+function isCaptureDue(state, config) {
+  if (!state.last_capture_ok) return true;
+  const min = Number(config.capture_interval_min) || 10;
+  const nextAt = Date.parse(state.last_capture_ok) + (min * 60 * 1000);
+  return Date.now() >= nextAt;
+}
+
 async function run() {
+  let releaseLock;
+  try {
+    releaseLock = acquireLock(CAPTURE_LOCK);
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      console.log('Capture already running, skipping');
+      process.exit(0);
+    }
+    throw err;
+  }
+
   const config = readConfig();
+  const state = readState();
+
+  if (!isCaptureDue(state, config)) {
+    console.log('Capture skipped by interval setting');
+    releaseLock();
+    process.exit(0);
+  }
 
   if (!isLightsOn(config)) {
     console.log('Capture skipped by lights schedule');
+    releaseLock();
     process.exit(0);
   }
 
@@ -68,8 +97,6 @@ async function run() {
   const framePath = path.join(frameDir, `${timeStr}.jpg`);
   const latestPath = path.join(LATEST_DIR, 'latest.jpg');
   const url = `${config.camera_base_url}/capture`;
-
-  const state = readState();
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
@@ -95,7 +122,9 @@ async function run() {
     state.last_capture_error = err.message;
     writeState(state);
     console.error('Capture failed:', err.message);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    releaseLock();
   }
 }
 

@@ -6,9 +6,11 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const fs = require('fs');
 const path = require('path');
+const { acquireLock } = require('../src/services/locks');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const PRUNE_LOCK = '/tmp/growcam-prune.lock';
 
 function readRetentionDays() {
   const def = parseInt(process.env.RETENTION_DAYS || '30', 10);
@@ -40,8 +42,27 @@ function pruneDir(dir, days) {
   });
 }
 
-const days = readRetentionDays();
-console.log(`Pruning entries older than ${days} days...`);
-pruneDir(path.join(DATA_DIR, 'frames'), days);
-pruneDir(path.join(DATA_DIR, 'timelapse', 'daily'), days);
-console.log('Prune complete');
+function main() {
+  let releaseLock;
+  try {
+    releaseLock = acquireLock(PRUNE_LOCK);
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      console.log('Prune already running, skipping');
+      process.exit(0);
+    }
+    throw err;
+  }
+
+  try {
+    const days = readRetentionDays();
+    console.log(`Pruning entries older than ${days} days...`);
+    pruneDir(path.join(DATA_DIR, 'frames'), days);
+    pruneDir(path.join(DATA_DIR, 'timelapse', 'daily'), days);
+    console.log('Prune complete');
+  } finally {
+    releaseLock();
+  }
+}
+
+main();
